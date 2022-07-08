@@ -8,6 +8,7 @@
 #ifndef __LINUX_USB_TCPCI_H
 #define __LINUX_USB_TCPCI_H
 
+#include <linux/usb/tcpm.h>
 #include <linux/usb/typec.h>
 
 #define TCPC_VENDOR_ID			0x0
