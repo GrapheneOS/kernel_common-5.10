@@ -21,6 +21,7 @@
 
 static siphash_key_t net_secret __read_mostly;
 static siphash_key_t ts_secret __read_mostly;
+static siphash_key_t last_secret = {{0,0}};
 
 #define EPHEMERAL_PORT_SHUFFLE_PERIOD (10 * HZ)
 
@@ -32,23 +33,6 @@ static __always_inline void net_secret_init(void)
 static __always_inline void ts_secret_init(void)
 {
 	net_get_random_once(&ts_secret, sizeof(ts_secret));
-}
-#endif
-
-#ifdef CONFIG_INET
-static u32 seq_scale(u32 seq)
-{
-	/*
-	 *	As close as possible to RFC 793, which
-	 *	suggests using a 250 kHz clock.
-	 *	Further reading shows this assumes 2 Mb/s networks.
-	 *	For 10 Mb/s Ethernet, a 1 MHz clock is appropriate.
-	 *	For 10 Gb/s Ethernet, a 1 GHz clock should be ok, but
-	 *	we also need to limit the resolution so that the u32 seq
-	 *	overlaps less than one time per MSL (2 minutes).
-	 *	Choosing a clock of 64 ns period is OK. (period of 274 s)
-	 */
-	return seq + (ktime_get_real_ns() >> 6);
 }
 #endif
 
@@ -90,9 +74,21 @@ u32 secure_tcpv6_seq(const __be32 *saddr, const __be32 *daddr,
 	u32 hash;
 
 	net_secret_init();
+
+	if (!last_secret.key[0] && !last_secret.key[1]) {
+		memcpy(&last_secret, &net_secret, sizeof(last_secret));
+	} else {
+		hash = *((u32 *) & (net_secret.key[0]));
+		hash >>= 8;
+		last_secret.key[0] += hash;
+		hash = *((u32 *) & (net_secret.key[1]));
+		hash >>= 8;
+		last_secret.key[1] += hash;
+	}
+
 	hash = siphash(&combined, offsetofend(typeof(combined), dport),
-		       &net_secret);
-	return seq_scale(hash);
+		       &last_secret);
+	return hash;
 }
 EXPORT_SYMBOL(secure_tcpv6_seq);
 
@@ -139,10 +135,22 @@ u32 secure_tcp_seq(__be32 saddr, __be32 daddr,
 	u32 hash;
 
 	net_secret_init();
+
+	if (!last_secret.key[0] && !last_secret.key[1]) {
+		memcpy(&last_secret, &net_secret, sizeof(last_secret));
+	} else {
+		hash = *((u32 *) & (net_secret.key[0]));
+		hash >>= 8;
+		last_secret.key[0] += hash;
+		hash = *((u32 *) & (net_secret.key[1]));
+		hash >>= 8;
+		last_secret.key[1] += hash;
+	}
+
 	hash = siphash_3u32((__force u32)saddr, (__force u32)daddr,
 			    (__force u32)sport << 16 | (__force u32)dport,
-			    &net_secret);
-	return seq_scale(hash);
+			    &last_secret);
+	return hash;
 }
 EXPORT_SYMBOL_GPL(secure_tcp_seq);
 
